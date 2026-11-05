@@ -1,0 +1,4 @@
+{
+  "timeouts": { "stepMs": 30000 },
+  "browser": { "headless": true }
+}

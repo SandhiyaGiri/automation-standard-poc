@@ -1,0 +1,9 @@
+node_modules/
+reports/
+test-results/
+allure-results/
+allure-report/
+.env
+secrets/*
+!secrets/*.example
+.auth/
