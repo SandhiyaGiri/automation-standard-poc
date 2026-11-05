@@ -1,7 +1,20 @@
-// Post summary comment (ADF) + PDF attachment to Jira issue JIRA_KEY. Never fails the build.
+// Publish run result to Jira issue JIRA_KEY: PDF attachment, result label, build link, optional comment.
+// Never fails the build: each step is independent and only logs status codes / generic messages.
 import { readFileSync } from 'node:fs';
 
 const KEY_RE = /^[A-Z][A-Z0-9]+-\d+$/;
+const QUEUED = process.env.QUEUED_LABEL ?? 'automation-queued';
+const RESULT_LABELS = ['automation-passed', 'automation-failed', 'automation-error'];
+
+/** Exactly one result label per run; anything not PASSED/FAILED (e.g. NO_TESTS) is an error. */
+export function resultLabel(status) {
+  return status === 'PASSED' ? 'automation-passed' : status === 'FAILED' ? 'automation-failed' : 'automation-error';
+}
+
+export function labelUpdate(status) {
+  const add = resultLabel(status);
+  return RESULT_LABELS.filter((l) => l !== add).concat(QUEUED).map((remove) => ({ remove })).concat({ add });
+}
 
 export function adfComment(s) {
   const lines = [
@@ -28,34 +41,46 @@ async function main() {
   if (tagMap[s.jiraKey] !== s.tags) throw new Error(`TAGS do not match tag map for ${s.jiraKey}`);
 
   const base = JIRA_BASE_URL.replace(/\/$/, '');
+  const issue = `${base}/rest/api/3/issue/${s.jiraKey}`;
   const auth = 'Basic ' + Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64');
+  const json = { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json' };
 
-  const c = await fetch(`${base}/rest/api/3/issue/${s.jiraKey}/comment`, {
-    method: 'POST',
-    headers: { Authorization: auth, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ body: adfComment(s) }),
+  const call = async (name, fn) => {
+    try {
+      const r = await fn();
+      console.log(r.ok ? `jira-notify: ${name} ok` : `jira-notify: ${name} failed: HTTP ${r.status}`);
+    } catch (e) {
+      console.error(`jira-notify: ${name} failed: ${e.name}`);
+    }
+  };
+
+  await call('attachment', () => {
+    const form = new FormData();
+    form.append('file', new Blob([readFileSync('reports/summary.pdf')], { type: 'application/pdf' }), `${s.jiraKey}-build-${s.buildNumber}.pdf`);
+    return fetch(`${issue}/attachments`, { method: 'POST', headers: { Authorization: auth, 'X-Atlassian-Token': 'no-check' }, body: form });
   });
-  if (!c.ok) throw new Error(`comment failed: HTTP ${c.status}`);
 
-  const form = new FormData();
-  form.append('file', new Blob([readFileSync('reports/summary.pdf')], { type: 'application/pdf' }), `${s.jiraKey}-build-${s.buildNumber}.pdf`);
-  const a = await fetch(`${base}/rest/api/3/issue/${s.jiraKey}/attachments`, {
-    method: 'POST',
-    headers: { Authorization: auth, 'X-Atlassian-Token': 'no-check' },
-    body: form,
-  });
-  if (!a.ok) throw new Error(`attachment failed: HTTP ${a.status}`);
-  console.log(`Jira ${s.jiraKey} updated (comment + PDF)`);
+  await call('label', () =>
+    fetch(issue, { method: 'PUT', headers: json, body: JSON.stringify({ update: { labels: labelUpdate(s.status) } }) }));
 
-  // Best effort: clear the "queued" marker the poller set. Never fails the report.
-  await fetch(`${base}/rest/api/3/issue/${s.jiraKey}`, {
-    method: 'PUT',
-    headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ update: { labels: [{ remove: process.env.QUEUED_LABEL ?? 'automation-queued' }] } }),
-  }).catch(() => {});
+  // Same globalId => Jira updates the link in place, so the ticket shows the latest run only.
+  if (/^https?:\/\//.test(s.buildUrl)) {
+    await call('build link', () =>
+      fetch(`${issue}/remotelink`, {
+        method: 'POST',
+        headers: json,
+        body: JSON.stringify({
+          globalId: 'automation-latest-run',
+          object: { url: s.buildUrl, title: `Automation #${s.buildNumber} - ${s.status} (${s.passed}/${s.total} passed)` },
+        }),
+      }));
+  }
+
+  if (process.env.JIRA_COMMENT === 'true') {
+    await call('comment', () => fetch(`${issue}/comment`, { method: 'POST', headers: json, body: JSON.stringify({ body: adfComment(s) }) }));
+  }
 }
 
 if (process.argv[1]?.endsWith('jira-notify.mjs')) {
-  // Only status codes / generic messages are logged: never headers or tokens.
   main().catch((e) => { console.error(`jira-notify: ${e.message}`); process.exit(0); });
 }

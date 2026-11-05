@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { summarize } from './jira-report.mjs';
-import { adfComment } from './jira-notify.mjs';
+import { adfComment, labelUpdate, resultLabel } from './jira-notify.mjs';
 
 const sc = (...st) => ({ type: 'scenario', name: 'x', tags: [], steps: st.map((status) => ({ result: { status } })) });
 
@@ -19,6 +19,16 @@ test('poller only runs well-formed, mapped keys', async () => {
   const w = selectWork(['KAN-1', 'KAN-99', 'bad', 'KAN-2; x', 'constructor'], { 'KAN-1': '@A', 'KAN-2': '@B' });
   assert.deepEqual(w.run, [['KAN-1', '@A']]);
   assert.equal(w.skip.length, 4);
+});
+
+test('result label: one per run, others removed, NO_TESTS is error', () => {
+  assert.equal(resultLabel('PASSED'), 'automation-passed');
+  assert.equal(resultLabel('FAILED'), 'automation-failed');
+  assert.equal(resultLabel('NO_TESTS'), 'automation-error');
+  const ops = labelUpdate('FAILED');
+  assert.deepEqual(ops.filter((o) => o.add), [{ add: 'automation-failed' }]);
+  assert.ok(ops.some((o) => o.remove === 'automation-passed') && ops.some((o) => o.remove === 'automation-queued'));
+  assert.ok(!ops.some((o) => o.remove === 'automation-failed'));
 });
 
 test('adf comment shape', () => {
