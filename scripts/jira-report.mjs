@@ -1,5 +1,5 @@
 // Parse reports/cucumber-report.json -> reports/summary.json (status + counts).
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 export function summarize(features) {
   const c = { total: 0, passed: 0, failed: 0, skipped: 0 };
@@ -24,6 +24,7 @@ export function summarize(features) {
 }
 
 if (import.meta.url === `file://${process.argv[1].replace(/\\/g, '/')}` || process.argv[1]?.endsWith('jira-report.mjs')) {
+  mkdirSync('reports', { recursive: true }); // tests may have crashed before creating it
   const src = 'reports/cucumber-report.json';
   const base = existsSync(src) ? summarize(JSON.parse(readFileSync(src, 'utf8'))) : { status: 'NO_REPORT', total: 0, passed: 0, failed: 0, skipped: 0, scenarios: [] };
   const e = process.env;
