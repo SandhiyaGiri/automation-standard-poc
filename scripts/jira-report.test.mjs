@@ -14,6 +14,13 @@ test('passed / failed / skipped / empty', () => {
   assert.equal(summarize([]).status, 'NO_TESTS');
 });
 
+test('poller only runs well-formed, mapped keys', async () => {
+  const { selectWork } = await import('./jira-poll.mjs');
+  const w = selectWork(['KAN-1', 'KAN-99', 'bad', 'KAN-2; x', 'constructor'], { 'KAN-1': '@A', 'KAN-2': '@B' });
+  assert.deepEqual(w.run, [['KAN-1', '@A']]);
+  assert.equal(w.skip.length, 4);
+});
+
 test('adf comment shape', () => {
   const d = adfComment({ jiraKey: 'POC-101', environment: 'QA', tenant: 'DEMO', status: 'PASSED', total: 1, passed: 1, failed: 0, skipped: 0, buildNumber: 3, buildUrl: 'u' });
   assert.equal(d.type, 'doc');

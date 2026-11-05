@@ -1,0 +1,39 @@
+// Polling alternative to the inbound webhook: Jenkins asks Jira, Jira never calls Jenkins.
+pipeline {
+  agent any
+  options {
+    disableConcurrentBuilds()                       // one poller at a time => claim step cannot race
+    timeout(time: 2, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  stages {
+    stage('Poll Jira') {
+      steps {
+        script {
+          def out = ''
+          withCredentials([
+            string(credentialsId: 'jira-base-url',  variable: 'JIRA_BASE_URL'),
+            string(credentialsId: 'jira-email',     variable: 'JIRA_EMAIL'),
+            string(credentialsId: 'jira-api-token', variable: 'JIRA_API_TOKEN')
+          ]) {
+            out = sh(returnStdout: true, script: 'node scripts/jira-poll.mjs').trim()
+          }
+          // Re-validate every line before it becomes a build parameter.
+          out.split('\n').findAll { it ==~ /^[A-Z][A-Z0-9]+-\d+\|@[A-Za-z0-9_-]+$/ }.each { line ->
+            def (key, tag) = line.tokenize('|')
+            echo "Triggering automation-run for ${key} (${tag})"
+            build job: 'automation-run', wait: false, parameters: [
+              string(name: 'TAGS', value: tag),
+              string(name: 'ENV', value: 'QA'),
+              string(name: 'TENANT', value: 'DEMO'),
+              string(name: 'RETRY', value: '1'),
+              string(name: 'JIRA_KEY', value: key),
+              booleanParam(name: 'FORCE_FAIL', value: false)
+            ]
+          }
+        }
+      }
+    }
+  }
+}

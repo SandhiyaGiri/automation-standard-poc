@@ -46,6 +46,13 @@ async function main() {
   });
   if (!a.ok) throw new Error(`attachment failed: HTTP ${a.status}`);
   console.log(`Jira ${s.jiraKey} updated (comment + PDF)`);
+
+  // Best effort: clear the "queued" marker the poller set. Never fails the report.
+  await fetch(`${base}/rest/api/3/issue/${s.jiraKey}`, {
+    method: 'PUT',
+    headers: { Authorization: auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ update: { labels: [{ remove: process.env.QUEUED_LABEL ?? 'automation-queued' }] } }),
+  }).catch(() => {});
 }
 
 if (process.argv[1]?.endsWith('jira-notify.mjs')) {
