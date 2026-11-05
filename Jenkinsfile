@@ -8,6 +8,7 @@ pipeline {
     choice(name: 'TENANT',   choices: ['DEMO'], description: 'Tenant')
     string(name: 'RETRY',    defaultValue: '1',  description: 'Retry count (0-2)')
     string(name: 'JIRA_KEY', defaultValue: '',   description: 'Jira issue to update (blank = skip Jira)')
+    booleanParam(name: 'FORCE_FAIL', defaultValue: false, description: 'Demo only: force a failing assertion')
   }
 
   environment { CI = '1' }
@@ -27,7 +28,9 @@ pipeline {
     }
     stage('Test') {
       steps {
-        sh "npm test -- --tags '${params.TAGS}' --retry ${params.RETRY}"
+        withEnv(["FORCE_FAIL=${params.FORCE_FAIL ? '1' : '0'}"]) {
+          sh "npm test -- --tags '${params.TAGS}' --retry ${params.RETRY}"
+        }
       }
     }
   }
